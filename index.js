@@ -64,7 +64,7 @@ for (const dir of [ASSETS_DIR, BAILEYS_DIR, TEMP_DIR, CMD_DIR]) {
 const logger = pino(
   {
     timestamp: () => `,"time":"${new Date().toJSON()}"`,
-    level: "silent" // Alterado para evitar poluição visual de logs internos da Baileys
+    level: "silent"
   },
   pino.destination(LOG_FILE)
 );
@@ -247,7 +247,7 @@ function markOutgoing(result) {
 }
 
 /* ============================================================
-   EXTRAÇÃO E TRATAMENTO DE MENSAGENS
+   EXTRAÇÃO E TRATAMENTO DE MENSAGENS (COM FALLBACK ANTI-ERRO)
 ============================================================ */
 function unwrapMessage(message) {
   let current = message || {};
@@ -265,159 +265,181 @@ function unwrapMessage(message) {
 }
 
 function getMessageType(webMessage) {
-  const message = unwrapMessage(webMessage?.message);
-  if (!message) return "unknown";
-  return Object.keys(message)[0] || "unknown";
+  try {
+    const message = unwrapMessage(webMessage?.message);
+    if (!message) return "unknown";
+    return Object.keys(message)[0] || "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 function getContextInfo(message) {
-  return (
-    message?.contextInfo ||
-    message?.extendedTextMessage?.contextInfo ||
-    message?.imageMessage?.contextInfo ||
-    message?.videoMessage?.contextInfo ||
-    message?.documentMessage?.contextInfo ||
-    message?.audioMessage?.contextInfo ||
-    message?.stickerMessage?.contextInfo ||
-    message?.buttonsResponseMessage?.contextInfo ||
-    message?.templateButtonReplyMessage?.contextInfo ||
-    message?.listResponseMessage?.contextInfo ||
-    message?.interactiveResponseMessage?.contextInfo ||
-    message?.nativeFlowResponseMessage?.contextInfo ||
-    message?.reactionMessage?.key?.contextInfo ||
-    null
-  );
+  try {
+    return (
+      message?.contextInfo ||
+      message?.extendedTextMessage?.contextInfo ||
+      message?.imageMessage?.contextInfo ||
+      message?.videoMessage?.contextInfo ||
+      message?.documentMessage?.contextInfo ||
+      message?.audioMessage?.contextInfo ||
+      message?.stickerMessage?.contextInfo ||
+      message?.buttonsResponseMessage?.contextInfo ||
+      message?.templateButtonReplyMessage?.contextInfo ||
+      message?.listResponseMessage?.contextInfo ||
+      message?.interactiveResponseMessage?.contextInfo ||
+      message?.nativeFlowResponseMessage?.contextInfo ||
+      message?.reactionMessage?.key?.contextInfo ||
+      null
+    );
+  } catch {
+    return null;
+  }
 }
 
 function extractMessageDetails(webMessage) {
-  const original = webMessage?.message || {};
-  const message = unwrapMessage(original);
-  const key = webMessage?.key || {};
-  if (!message) {
+  try {
+    const original = webMessage?.message || {};
+    const message = unwrapMessage(original);
+    const key = webMessage?.key || {};
+    if (!message) {
+      return {
+        type: "unknown", text: "", buttonId: "", buttonText: "",
+        listId: "", listTitle: "", data: {}, raw: {}, original,
+        contextInfo: null, key
+      };
+    }
+    let type = getMessageType(webMessage);
+    let text = "";
+    let buttonId = "";
+    let buttonText = "";
+    let listId = "";
+    let listTitle = "";
+    let data = {};
+
+    if (message.conversation) {
+      type = "text";
+      text = message.conversation;
+      data = { text: message.conversation };
+    } else if (message.extendedTextMessage) {
+      type = "extended_text";
+      text = message.extendedTextMessage.text || "";
+      data = { ...message.extendedTextMessage };
+    } else if (message.imageMessage) {
+      type = "image";
+      text = message.imageMessage.caption || "";
+      data = { ...message.imageMessage };
+    } else if (message.videoMessage) {
+      type = "video";
+      text = message.videoMessage.caption || "";
+      data = { ...message.videoMessage };
+    } else if (message.documentMessage) {
+      type = "document";
+      text = message.documentMessage.caption || message.documentMessage.fileName || "";
+      data = { ...message.documentMessage };
+    } else if (message.audioMessage) {
+      type = "audio";
+      data = { ...message.audioMessage };
+    } else if (message.stickerMessage) {
+      type = "sticker";
+      data = { ...message.stickerMessage };
+    } else if (message.reactionMessage) {
+      type = "reaction";
+      text = message.reactionMessage.text || "";
+      data = { ...message.reactionMessage };
+    } else if (message.buttonsResponseMessage) {
+      type = "button_reply";
+      const item = message.buttonsResponseMessage;
+      buttonId = item.selectedButtonId || item.id || "";
+      buttonText = item.selectedDisplayText || item.displayText || item.text || "";
+      text = buttonText || buttonId;
+      data = { ...item };
+    } else if (message.templateButtonReplyMessage) {
+      type = "template_button_reply";
+      const item = message.templateButtonReplyMessage;
+      buttonId = item.selectedId || item.selectedButtonId || item.id || "";
+      buttonText = item.selectedDisplayText || item.displayText || item.text || "";
+      text = buttonText || buttonId;
+      data = { ...item };
+    } else if (message.listResponseMessage) {
+      type = "list_reply";
+      const item = message.listResponseMessage;
+      const selected = item.singleSelectReply || {};
+      listId = selected.selectedRowId || item.selectedRowId || "";
+      listTitle = item.title || item.description || "";
+      text = selected.title || selected.description || listTitle || listId;
+      data = { ...item };
+    } else if (message.interactiveResponseMessage || message.nativeFlowResponseMessage) {
+      type = message.interactiveResponseMessage ? "interactive_reply" : "native_flow_reply";
+      const item = message.interactiveResponseMessage || message.nativeFlowResponseMessage;
+      const native = item.nativeFlowResponseMessage || item;
+      const paramsJson = native.paramsJson || item.paramsJson || "";
+      let params = {};
+      try { params = JSON.parse(paramsJson); } catch { params = { rawParamsJson: paramsJson }; }
+      buttonId = params.id || params.selectedId || params.selected_id || params.button_id || params.selectedRowId || "";
+      buttonText = params.display_text || params.selected_display_text || params.button_text || params.text || "";
+      listId = params.selectedRowId || params.selected_id || params.id || "";
+      text = buttonText || buttonId || params.text || "";
+      data = { ...item, params };
+    } else if (message.locationMessage) {
+      type = "location";
+      text = message.locationMessage.name || message.locationMessage.address || "";
+      data = { ...message.locationMessage };
+    } else if (message.contactMessage) {
+      type = "contact";
+      text = message.contactMessage.displayName || "";
+      data = { ...message.contactMessage };
+    } else if (message.pollCreationMessage) {
+      type = "poll_creation";
+      text = message.pollCreationMessage.name || "";
+      data = { ...message.pollCreationMessage };
+    } else {
+      type = getMessageType(webMessage);
+      data = { ...message };
+    }
+
+    return {
+      type,
+      text: String(text || "").trim(),
+      buttonId: String(buttonId || "").trim(),
+      buttonText: String(buttonText || "").trim(),
+      listId: String(listId || "").trim(),
+      listTitle: String(listTitle || "").trim(),
+      data,
+      raw: message,
+      original,
+      contextInfo: getContextInfo(message),
+      key,
+      webMessage
+    };
+  } catch (err) {
     return {
       type: "unknown", text: "", buttonId: "", buttonText: "",
-      listId: "", listTitle: "", data: {}, raw: {}, original,
-      contextInfo: null, key
+      listId: "", listTitle: "", data: {}, raw: {}, original: webMessage?.message || {},
+      contextInfo: null, key: webMessage?.key || {}
     };
   }
-  let type = getMessageType(webMessage);
-  let text = "";
-  let buttonId = "";
-  let buttonText = "";
-  let listId = "";
-  let listTitle = "";
-  let data = {};
-  if (message.conversation) {
-    type = "text";
-    text = message.conversation;
-    data = { text: message.conversation };
-  } else if (message.extendedTextMessage) {
-    type = "extended_text";
-    text = message.extendedTextMessage.text || "";
-    data = { ...message.extendedTextMessage };
-  } else if (message.imageMessage) {
-    type = "image";
-    text = message.imageMessage.caption || "";
-    data = { ...message.imageMessage };
-  } else if (message.videoMessage) {
-    type = "video";
-    text = message.videoMessage.caption || "";
-    data = { ...message.videoMessage };
-  } else if (message.documentMessage) {
-    type = "document";
-    text = message.documentMessage.caption || message.documentMessage.fileName || "";
-    data = { ...message.documentMessage };
-  } else if (message.audioMessage) {
-    type = "audio";
-    data = { ...message.audioMessage };
-  } else if (message.stickerMessage) {
-    type = "sticker";
-    data = { ...message.stickerMessage };
-  } else if (message.reactionMessage) {
-    type = "reaction";
-    text = message.reactionMessage.text || "";
-    data = { ...message.reactionMessage };
-  } else if (message.buttonsResponseMessage) {
-    type = "button_reply";
-    const item = message.buttonsResponseMessage;
-    buttonId = item.selectedButtonId || item.id || "";
-    buttonText = item.selectedDisplayText || item.displayText || item.text || "";
-    text = buttonText || buttonId;
-    data = { ...item };
-  } else if (message.templateButtonReplyMessage) {
-    type = "template_button_reply";
-    const item = message.templateButtonReplyMessage;
-    buttonId = item.selectedId || item.selectedButtonId || item.id || "";
-    buttonText = item.selectedDisplayText || item.displayText || item.text || "";
-    text = buttonText || buttonId;
-    data = { ...item };
-  } else if (message.listResponseMessage) {
-    type = "list_reply";
-    const item = message.listResponseMessage;
-    const selected = item.singleSelectReply || {};
-    listId = selected.selectedRowId || item.selectedRowId || "";
-    listTitle = item.title || item.description || "";
-    text = selected.title || selected.description || listTitle || listId;
-    data = { ...item };
-  } else if (message.interactiveResponseMessage || message.nativeFlowResponseMessage) {
-    type = message.interactiveResponseMessage ? "interactive_reply" : "native_flow_reply";
-    const item = message.interactiveResponseMessage || message.nativeFlowResponseMessage;
-    const native = item.nativeFlowResponseMessage || item;
-    const paramsJson = native.paramsJson || item.paramsJson || "";
-    let params = {};
-    try { params = JSON.parse(paramsJson); } catch { params = { rawParamsJson: paramsJson }; }
-    buttonId = params.id || params.selectedId || params.selected_id || params.button_id || params.selectedRowId || "";
-    buttonText = params.display_text || params.selected_display_text || params.button_text || params.text || "";
-    listId = params.selectedRowId || params.selected_id || params.id || "";
-    text = buttonText || buttonId || params.text || "";
-    data = { ...item, params };
-  } else if (message.locationMessage) {
-    type = "location";
-    text = message.locationMessage.name || message.locationMessage.address || "";
-    data = { ...message.locationMessage };
-  } else if (message.contactMessage) {
-    type = "contact";
-    text = message.contactMessage.displayName || "";
-    data = { ...message.contactMessage };
-  } else if (message.pollCreationMessage) {
-    type = "poll_creation";
-    text = message.pollCreationMessage.name || "";
-    data = { ...message.pollCreationMessage };
-  } else {
-    type = getMessageType(webMessage);
-    data = { ...message };
-  }
-  return {
-    type,
-    text: String(text || "").trim(),
-    buttonId: String(buttonId || "").trim(),
-    buttonText: String(buttonText || "").trim(),
-    listId: String(listId || "").trim(),
-    listTitle: String(listTitle || "").trim(),
-    data,
-    raw: message,
-    original,
-    contextInfo: getContextInfo(message),
-    key,
-    webMessage
-  };
 }
 
 function extractQuotedDetails(webMessage) {
-  const message = unwrapMessage(webMessage?.message);
-  const contextInfo = getContextInfo(message);
-  if (!contextInfo?.quotedMessage) return null;
-  const quotedWebMessage = {
-    key: {
-      remoteJid: contextInfo.remoteJid || webMessage?.key?.remoteJid || null,
-      participant: contextInfo.participant || "",
-      id: contextInfo.stanzaId || "",
-      fromMe: false
-    },
-    message: contextInfo.quotedMessage,
-    pushName: ""
-  };
-  return extractMessageDetails(quotedWebMessage);
+  try {
+    const message = unwrapMessage(webMessage?.message);
+    const contextInfo = getContextInfo(message);
+    if (!contextInfo?.quotedMessage) return null;
+    const quotedWebMessage = {
+      key: {
+        remoteJid: contextInfo.remoteJid || webMessage?.key?.remoteJid || null,
+        participant: contextInfo.participant || "",
+        id: contextInfo.stanzaId || "",
+        fromMe: false
+      },
+      message: contextInfo.quotedMessage,
+      pushName: ""
+    };
+    return extractMessageDetails(quotedWebMessage);
+  } catch {
+    return null;
+  }
 }
 
 function getRemoteJid(webMessage) {
@@ -511,7 +533,7 @@ function findCommand(text) {
 }
 
 /* ============================================================
-   FUNÇÕES DE ENVIO
+   FUNÇÕES DE ENVIO COMPATÍVEIS COM QUALQUER BOTÃO
 ============================================================ */
 async function sendText(socket, jid, text, quoted) {
   if (!text) return null;
@@ -531,6 +553,62 @@ async function sendAudio(socket, jid, audio, quoted) {
     quoted ? { quoted } : undefined
   );
   return markOutgoing(result);
+}
+
+// Helper Universal de Botões (Compatível com Baileys moderno via nativeFlowMessage)
+async function sendButtons(socket, jid, { text, footer = "", buttons = [], image = null, quoted = null }) {
+  try {
+    const formattedButtons = buttons.map((btn, index) => {
+      const id = btn.id || btn.buttonId || `btn_${index}`;
+      const displayText = btn.text || btn.displayText || btn.title || `Botão ${index + 1}`;
+      
+      if (btn.url) {
+        return {
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: displayText,
+            url: btn.url,
+            merchant_url: btn.url
+          })
+        };
+      }
+      return {
+        name: "quick_reply",
+        buttonParamsJson: JSON.stringify({
+          display_text: displayText,
+          id: id
+        })
+      };
+    });
+
+    const interactiveMessage = {
+      body: { text: String(text || "") },
+      footer: { text: String(footer || "") },
+      nativeFlowMessage: { buttons: formattedButtons }
+    };
+
+    if (image) {
+      interactiveMessage.header = {
+        hasMediaAttachment: true,
+        imageMessage: typeof image === "string" ? { url: image } : image
+      };
+    }
+
+    const messageContent = {
+      viewOnceMessage: {
+        message: {
+          interactiveMessage
+        }
+      }
+    };
+
+    const result = await socket.sendMessage(jid, messageContent, quoted ? { quoted } : undefined);
+    return markOutgoing(result);
+  } catch (err) {
+    warning(`Falha ao enviar botões interativos, usando fallback de texto: ${err.message}`);
+    const fallbackText = `${text}\n\n` + buttons.map((b, i) => `[${i + 1}] ${b.text || b.displayText}`).join("\n");
+    return sendText(socket, jid, fallbackText, quoted);
+  }
 }
 
 /* ============================================================
@@ -553,6 +631,7 @@ function createCommandContext(socket, webMessage, text, commandName) {
   const chatType = getChatType(jid);
   const senderJid = key.participant || key.remoteJid || "";
   const senderNumber = String(senderJid).replace(/[^0-9]/g, "");
+  
   return {
     socket, sock: socket, client: socket, conn: socket, baileys: socket,
     message: webMessage, msg: webMessage, webMessage, m: webMessage,
@@ -587,6 +666,7 @@ function createCommandContext(socket, webMessage, text, commandName) {
     sendReply: value => sendText(socket, jid, value, webMessage),
     reply: value => sendText(socket, jid, value, webMessage),
     sendAudio: (audio, quoted = webMessage) => sendAudio(socket, jid, audio, quoted),
+    sendButtons: (opts, quoted = webMessage) => sendButtons(socket, jid, { ...opts, quoted }),
     getMessageDetails: () => extractMessageDetails(webMessage),
     getQuotedDetails: () => extractQuotedDetails(webMessage),
     getContextInfo: () => getContextInfo(details.raw),
@@ -603,13 +683,14 @@ function createCommandContext(socket, webMessage, text, commandName) {
    EXECUÇÃO DE COMANDOS & FALLBACK
 ============================================================ */
 async function executeCommand(socket, webMessage, text) {
-  const found = findCommand(text);
-  if (!found || !found.command) return false;
-  const commandName = found.name;
-  const mod = found.command;
-  const context = createCommandContext(socket, webMessage, text, commandName);
-  info(`Executando: ${commandName} por ${context.senderNumber || "desconhecido"}`);
   try {
+    const found = findCommand(text);
+    if (!found || !found.command) return false;
+    const commandName = found.name;
+    const mod = found.command;
+    const context = createCommandContext(socket, webMessage, text, commandName);
+    info(`Executando: ${commandName} por ${context.senderNumber || "desconhecido"}`);
+    
     if (typeof mod === "function") {
       try {
         await mod(context);
@@ -630,9 +711,9 @@ async function executeCommand(socket, webMessage, text) {
     success(`Concluído: ${commandName}`);
     return true;
   } catch (err) {
-    error(`Erro ao executar '${commandName}': ${err?.stack || err?.message || err}`);
+    error(`Erro crítico no comando: ${err?.stack || err?.message || err}`);
     try {
-      await sendText(socket, context.jid, "Ocorreu um erro ao processar este comando.", webMessage);
+      await sendText(socket, getRemoteJid(webMessage), "Ocorreu um erro interno ao processar este comando.", webMessage);
     } catch {}
     return true;
   }
@@ -640,9 +721,9 @@ async function executeCommand(socket, webMessage, text) {
 
 async function executeFallback(socket, webMessage, text) {
   if (!fallbackHandler) return false;
-  const context = createCommandContext(socket, webMessage, text, "AMHEEX_FALLBACK");
-  context.isAI = true;
   try {
+    const context = createCommandContext(socket, webMessage, text, "AMHEEX_FALLBACK");
+    context.isAI = true;
     if (typeof fallbackHandler.handle === "function") {
       await fallbackHandler.handle(context);
       return true;
@@ -665,26 +746,31 @@ async function executeFallback(socket, webMessage, text) {
    PROCESSAMENTO DE MENSAGENS
 ============================================================ */
 async function processMessage(socket, webMessage) {
-  const key = webMessage?.key || {};
-  const remoteJid = key.remoteJid;
-  if (!remoteJid || !webMessage?.message) return;
-  const ownMessage = !!key.fromMe;
-  const details = extractMessageDetails(webMessage);
-  const text = details.text;
-  const sender = key.participant || remoteJid;
-  info(`[${getChatType(remoteJid)}] Mensagem de ${sender} | Tipo: ${details.type}`);
-  if (ownMessage) {
-    if (outgoingIds.has(key?.id)) return;
-    info("Comando manual disparado pela própria conta.");
+  try {
+    const key = webMessage?.key || {};
+    const remoteJid = key.remoteJid;
+    if (!remoteJid || !webMessage?.message) return;
+    const ownMessage = !!key.fromMe;
+    const details = extractMessageDetails(webMessage);
+    const text = details.text;
+    const sender = key.participant || remoteJid;
+    
+    info(`[${getChatType(remoteJid)}] Mensagem de ${sender} | Tipo: ${details.type}`);
+    if (ownMessage) {
+      if (outgoingIds.has(key?.id)) return;
+      info("Comando manual disparado pela própria conta.");
+    }
+    if (!text) return;
+    const commandExecuted = await executeCommand(socket, webMessage, text);
+    if (commandExecuted) return;
+    await executeFallback(socket, webMessage, text);
+  } catch (err) {
+    error(`Erro em processMessage: ${err?.message || err}`);
   }
-  if (!text) return;
-  const commandExecuted = await executeCommand(socket, webMessage, text);
-  if (commandExecuted) return;
-  await executeFallback(socket, webMessage, text);
 }
 
 /* ============================================================
-   CONEXÃO COM A BAILEYS
+   CONEXÃO COM A BAILEYS & LIMPEZA AUTOMÁTICA DE CREDENCIAIS
 ============================================================ */
 async function connect() {
   if (AUTO_RESTART.restarting) return null;
@@ -693,9 +779,22 @@ async function connect() {
     return activeSocket;
   }
   
+  // Limpeza de segurança caso o arquivo de credenciais corrompa (evita erros 404/desconexões em loop)
+  const credsPath = path.join(BAILEYS_DIR, "creds.json");
+  if (fs.existsSync(credsPath)) {
+    try {
+      const stats = fs.statSync(credsPath);
+      if (stats.size < 10) {
+        warning("Arquivo creds.json corrompido ou vazio detectado. Removendo para reautenticação limpa...");
+        fs.unlinkSync(credsPath);
+      }
+    } catch (e) {
+      warning(`Não foi possível verificar creds.json: ${e.message}`);
+    }
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState(BAILEYS_DIR);
   
-  // Tratamento de versão otimizado
   let version = [2, 3000, 1015901307];
   try {
     const fetchedVersion = await fetchLatestBaileysVersion();
@@ -703,7 +802,7 @@ async function connect() {
       version = fetchedVersion.version;
     }
   } catch (e) {
-    warning("Não foi possível buscar a última versão da Baileys, usando fallback interno.");
+    warning("Não foi possível buscar a última versão da Baileys, usando versão compatível interna fixa.");
   }
 
   const socket = makeWASocket({
@@ -748,7 +847,6 @@ async function connect() {
           const cleanNumber = String(phoneNumber || "").replace(/[^0-9]/g, "");
           if (cleanNumber) {
             info("Solicitando código de pareamento...");
-            // Ajustado para sintaxe padrão Baileys
             const code = await socket.requestPairingCode(cleanNumber);
             console.log("\n=================================");
             success(`CÓDIGO DE PAREAMENTO: ${code}`);
@@ -787,7 +885,10 @@ async function connect() {
       
       warning(`Conexão fechada. Código: ${statusCode || "Desconhecido"}`);
       if (!shouldReconnect) {
-        error("Sessão encerrada (loggedOut). Remova a pasta de credenciais e escaneie o QR Code novamente.");
+        error("Sessão encerrada (loggedOut). Removendo credenciais corrompidas para novo pareamento...");
+        try {
+          if (fs.existsSync(credsPath)) fs.unlinkSync(credsPath);
+        } catch {}
         return;
       }
       
