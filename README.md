@@ -20,3 +20,8 @@ Copie e cole o comando abaixo no Termux para configurar o armazenamento, instala
 ```bash
 bash <(curl -s https://raw.githubusercontent.com/AMHEEX/WHATSAPP-BOT/main/index.sh)
 ```
+
+Comando Versão (COLAB)
+```bash
+!rm -rf WHATSAPP-BOT && git clone https://github.com/AMHEEX/WHATSAPP-BOT && cd WHATSAPP-BOT && npm install && npm start
+```
