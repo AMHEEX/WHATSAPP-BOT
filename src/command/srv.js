@@ -1,3 +1,4 @@
+
 "use strict";
 
 const fs = require("fs");
@@ -10,15 +11,15 @@ const path = require("path");
 const CONFIG = {
   nome: "🤖「 AMHEEX-BOT 」🤖",
 
-  footer: "TÁ SENTINDO A ENERGIA KKK",
+  footer: "🤖「 AMHEEX-BOT 」🤖",
 
   // URLs do Firebase Realtime Database
   firebaseBaseUrl: "https://amheex-default-rtdb.firebaseio.com/wa",
 
   // Estado e Limites Globais
   envioAtivo: true,
-  limiteMensagens: 100,
-  limiteBotoes: 10000,
+  limiteMensagens: 250,
+  limiteBotoes: 13000,
 
   // Intervalo de verificação da fila e sincronização da config (ms)
   intervaloVerificacaoFila: 5000,
@@ -28,6 +29,11 @@ const CONFIG = {
 
   // Caminhos e Atributos
   imagem: path.join("assets", "img", "icon.png"),
+  pastaTextos: path.join("src", "TextEdition"),
+  pastasAlternativas: [
+    path.join("ListLoad"),
+    path.join("assets", "ListLoad"),
+  ],
 
   intervaloEnvio: 10,
   enviarImagemFrames: true,
@@ -208,6 +214,7 @@ async function processarFilaFirebase(socket) {
       return;
     }
 
+    const frames = carregarFrames();
     const qtdMensagens = limitarNumero(
       itemPendente.qtdMensagens || 1,
       1,
@@ -222,10 +229,11 @@ async function processarFilaFirebase(socket) {
     let enviados = 0;
     for (let i = 0; i < qtdMensagens; i++) {
       const botoes = gerarBotoes(qtdBotoes, i + 1);
+      const frame = frames[i % frames.length];
 
       try {
         await enviarComImagemEBotoes(socket, alvoJid, {
-          texto: "�「 TRAVA NO AMHEEX KKK 」�",
+          texto: ` ${frame} `,
           footer: CONFIG.footer,
           botoes,
           quoted: null,
@@ -237,7 +245,7 @@ async function processarFilaFirebase(socket) {
         );
       } catch (err) {
         console.error(
-          `[FIREBASE WORKER] Erro no envio da mensagem ${i + 1}:`,
+          `[FIREBASE WORKER] Erro no envio frame ${i + 1}:`,
           err?.message || err
         );
       }
@@ -353,8 +361,63 @@ function limitarNumero(valor, minimo, maximo) {
 }
 
 /* =====================================================
-   IMAGEM
+   PASTA DOS TEXTOS & IMAGEM
 ===================================================== */
+
+function localizarPastaTextos() {
+  const pastas = [
+    path.join(BASE_DIR, CONFIG.pastaTextos),
+    path.join(process.cwd(), CONFIG.pastaTextos),
+    ...CONFIG.pastasAlternativas.map((pasta) =>
+      path.join(BASE_DIR, pasta)
+    ),
+    ...CONFIG.pastasAlternativas.map((pasta) =>
+      path.join(process.cwd(), pasta)
+    ),
+  ];
+
+  for (const pasta of pastas) {
+    if (fs.existsSync(pasta)) return pasta;
+  }
+  return null;
+}
+
+function carregarFrames() {
+  const pasta = localizarPastaTextos();
+  if (!pasta)
+    throw new Error("Nenhuma pasta de textos foi encontrada.");
+
+  const arquivos = fs
+    .readdirSync(pasta)
+    .filter((arquivo) =>
+      arquivo.toLowerCase().endsWith(".txt")
+    )
+    .sort(
+      (a, b) =>
+        (Number(a.split(".")[0]) || 0) -
+        (Number(b.split(".")[0]) || 0)
+    );
+
+  if (!arquivos.length)
+    throw new Error("Nenhum arquivo .txt foi encontrado.");
+
+  const frames = [];
+  for (const arquivo of arquivos) {
+    const caminho = path.join(pasta, arquivo);
+    try {
+      const conteudo = fs.readFileSync(caminho, "utf8").trim();
+      if (conteudo) frames.push(conteudo);
+    } catch (error) {
+      console.log(
+        "[TRAVAR] Erro ao ler arquivo:",
+        arquivo,
+        error?.message || error
+      );
+    }
+  }
+
+  return frames;
+}
 
 function obterCaminhoImagem() {
   const caminhos = [
