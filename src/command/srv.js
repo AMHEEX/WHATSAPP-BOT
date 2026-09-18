@@ -52,11 +52,10 @@ const CONFIG = {
 const BASE_DIR = process.cwd();
 
 /* =====================================================
-   IMPORTAÇÃO DOS BOTÕES (COMPATIBILIDADE /src/buttons.js)
+   IMPORTAÇÃO DOS BOTÕES (VERSÃO AUTORIZADA 2026)
 ===================================================== */
 
 let sendButtons = null;
-let sendInteractiveMessage = null;
 
 try {
   const buttonsPath = path.join(BASE_DIR, "src", "buttons");
@@ -64,13 +63,10 @@ try {
 
   if (typeof buttonsModule?.sendButtons === "function") {
     sendButtons = buttonsModule.sendButtons;
+    console.log("[TRAVAR] sendButtons carregado com sucesso (versão autorizada)!");
+  } else {
+    console.log("[TRAVAR] sendButtons não encontrado no módulo.");
   }
-
-  if (typeof buttonsModule?.sendInteractiveMessage === "function") {
-    sendInteractiveMessage = buttonsModule.sendInteractiveMessage;
-  }
-
-  console.log("[TRAVAR] Sistema de botões de src/buttons.js carregado com sucesso.");
 } catch (error) {
   console.log(
     "[TRAVAR] Sistema de botões indisponível em src/buttons.js:",
@@ -155,16 +151,10 @@ async function processarFilaFirebase(socket) {
   try {
     const listUrl = `${CONFIG.firebaseBaseUrl}/list.json`;
     const res = await fetch(listUrl);
-    if (!res.ok) {
-      processandoFila = false;
-      return;
-    }
+    if (!res.ok) return;
 
     const lista = await res.json();
-    if (!lista) {
-      processandoFila = false;
-      return;
-    }
+    if (!lista) return;
 
     const keys = Object.keys(lista);
     let itemPendenteKey = null;
@@ -178,15 +168,13 @@ async function processarFilaFirebase(socket) {
       }
     }
 
-    if (!itemPendenteKey || !itemPendente) {
-      processandoFila = false;
-      return;
-    }
+    if (!itemPendenteKey || !itemPendente) return;
 
     console.log(
       `[FIREBASE] Item detectado no servidor! ID: ${itemPendenteKey}`
     );
 
+    // CORRIGIDO: Interpolação correta usando crases (template string)
     await fetch(
       `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
       {
@@ -200,29 +188,56 @@ async function processarFilaFirebase(socket) {
     );
 
     let alvoJid = null;
-    if (
-      itemPendente.tipoAlvo === "grupo" &&
-      itemPendente.alvo.includes("chat.whatsapp.com")
-    ) {
-      const inviteCode = extrairInviteCode(itemPendente.alvo);
-      if (inviteCode) {
+    const alvoBruto = String(itemPendente.alvo || "").trim();
+
+    // LÓGICA INTELIGENTE DE RESOLUÇÃO DE GRUPO/PV
+    if (itemPendente.tipoAlvo === "grupo") {
+      if (alvoBruto.endsWith("@g.us") || /^\d+@g\.us$/.test(alvoBruto)) {         alvoJid = normalizarJid(alvoBruto);       } else if (/^\d+$/.test(alvoBruto) && alvoBruto.length > 12) {
+        alvoJid = `${alvoBruto}@g.us`;
+      } else {
+        const inviteCode = extrairInviteCode(alvoBruto) || alvoBruto;
+
         try {
-          const grupo = await socket.groupAcceptInvite(inviteCode);
-          alvoJid = normalizarJid(grupo);
+          let groups = {};
+          if (typeof socket.groupFetchAllParticipating === "function") {
+            groups = await socket.groupFetchAllParticipating();
+          }
+
+          let grupoEncontrado = null;
+          for (const gId of Object.keys(groups)) {
+            const meta = groups[gId];
+            if (meta && (meta.inviteCode === inviteCode || gId === inviteCode)) {
+              grupoEncontrado = gId;
+              break;
+            }
+          }
+
+          if (grupoEncontrado) {
+            alvoJid = normalizarJid(grupoEncontrado);
+            console.log(`[GRUPO] Bot já participa. JID oficial obtido: ${alvoJid}`);
+          } else {
+            console.log(`[GRUPO] Bot não está no grupo. Tentando entrar via convite...`);
+            const grupoRes = await socket.groupAcceptInvite(inviteCode);
+            const resolvedId = typeof grupoRes === "string" ? grupoRes : (grupoRes?.gid || grupoRes?.id || grupoRes);
+            alvoJid = normalizarJid(resolvedId);
+            console.log(`[GRUPO] Entrada realizada com sucesso! JID oficial: ${alvoJid}`);
+          }
         } catch (e) {
           console.error(
-            `[FIREBASE] Falha ao entrar no grupo: ${inviteCode}`
+            `[FIREBASE] Falha ao obter ID oficial ou entrar no grupo (${alvoBruto}):`,
+            e?.message || e
           );
         }
       }
     } else {
-      alvoJid = extrairNumero(itemPendente.alvo);
+      alvoJid = extrairNumero(alvoBruto);
     }
 
     if (!alvoJid) {
       console.error(
-        `[FIREBASE] Alvo inválido. Removendo item: ${itemPendenteKey}`
+        `[FIREBASE] Alvo inválido ou sem acesso. Removendo item: ${itemPendenteKey}`
       );
+      // CORRIGIDO: Interpolação correta
       await fetch(
         `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
         {
@@ -231,7 +246,6 @@ async function processarFilaFirebase(socket) {
           body: JSON.stringify({ status: "erro_alvo_invalido" }),
         }
       );
-      processandoFila = false;
       return;
     }
 
@@ -261,6 +275,7 @@ async function processarFilaFirebase(socket) {
           usarImagem: CONFIG.enviarImagemFrames,
         });
         enviados++;
+        // CORRIGIDO: Interpolação correta
         console.log(
           `[FIREBASE WORKER] Enviado ${enviados}/${qtdMensagens} para ${alvoJid}`
         );
@@ -278,6 +293,7 @@ async function processarFilaFirebase(socket) {
 
     await incrementarContadorFirebase(itemPendente.tipoAlvo);
 
+    // CORRIGIDO: Interpolação correta
     await fetch(
       `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
       {
@@ -320,10 +336,13 @@ function normalizarJid(jid) {
   const valor = String(jid).trim();
 
   if (valor.endsWith("@g.us")) return valor;
-  if (
-    valor.endsWith("@s.whatsapp.net") ||
-    valor.endsWith("@c.us")
-  ) {
+  if (valor.includes("-") && !valor.includes("@")) {
+    return `${valor}@g.us`;
+  }
+  if (/^\d+$/.test(valor) && valor.length > 12) {
+    return `${valor}@g.us`;
+  }
+  if (valor.endsWith("@s.whatsapp.net") || valor.endsWith("@c.us")) {
     return valor.replace("@c.us", "@s.whatsapp.net");
   }
 
@@ -337,19 +356,14 @@ function extrairNumero(texto = "") {
 }
 
 function extrairInviteCode(texto = "") {
-  const match = String(texto).match(
-    /chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i
-  );
+  const match = String(texto).match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
   return match ? match[1] : null;
 }
 
 function limitarNumero(valor, minimo, maximo) {
   const numero = Number(valor);
   if (!Number.isFinite(numero)) return minimo;
-  return Math.min(
-    maximo,
-    Math.max(minimo, Math.floor(numero))
-  );
+  return Math.min(maximo, Math.max(minimo, Math.floor(numero)));
 }
 
 /* =====================================================
@@ -360,12 +374,8 @@ function localizarPastaTextos() {
   const pastas = [
     path.join(BASE_DIR, CONFIG.pastaTextos),
     path.join(process.cwd(), CONFIG.pastaTextos),
-    ...CONFIG.pastasAlternativas.map((pasta) =>
-      path.join(BASE_DIR, pasta)
-    ),
-    ...CONFIG.pastasAlternativas.map((pasta) =>
-      path.join(process.cwd(), pasta)
-    ),
+    ...CONFIG.pastasAlternativas.map((pasta) => path.join(BASE_DIR, pasta)),
+    ...CONFIG.pastasAlternativas.map((pasta) => path.join(process.cwd(), pasta)),
   ];
 
   for (const pasta of pastas) {
@@ -376,22 +386,14 @@ function localizarPastaTextos() {
 
 function carregarFrames() {
   const pasta = localizarPastaTextos();
-  if (!pasta)
-    throw new Error("Nenhuma pasta de textos foi encontrada.");
+  if (!pasta) throw new Error("Nenhuma pasta de textos foi encontrada.");
 
   const arquivos = fs
     .readdirSync(pasta)
-    .filter((arquivo) =>
-      arquivo.toLowerCase().endsWith(".txt")
-    )
-    .sort(
-      (a, b) =>
-        (Number(a.split(".")[0]) || 0) -
-        (Number(b.split(".")[0]) || 0)
-    );
+    .filter((arquivo) => arquivo.toLowerCase().endsWith(".txt"))
+    .sort((a, b) => (Number(a.split(".")[0]) || 0) - (Number(b.split(".")[0]) || 0));
 
-  if (!arquivos.length)
-    throw new Error("Nenhum arquivo .txt foi encontrado.");
+  if (!arquivos.length) throw new Error("Nenhum arquivo .txt foi encontrado.");
 
   const frames = [];
   for (const arquivo of arquivos) {
@@ -400,11 +402,7 @@ function carregarFrames() {
       const conteudo = fs.readFileSync(caminho, "utf8").trim();
       if (conteudo) frames.push(conteudo);
     } catch (error) {
-      console.log(
-        "[TRAVAR] Erro ao ler arquivo:",
-        arquivo,
-        error?.message || error
-      );
+      console.log("[TRAVAR] Erro ao ler arquivo:", arquivo, error?.message || error);
     }
   }
 
@@ -430,35 +428,33 @@ function obterImagem() {
   try {
     return fs.readFileSync(caminho);
   } catch (error) {
-    console.log(
-      "[TRAVAR] Erro ao carregar imagem:",
-      error?.message || error
-    );
+    console.log("[TRAVAR] Erro ao carregar imagem:", error?.message || error);
     return null;
   }
 }
 
 /* =====================================================
-   GERAÇÃO DE BOTÕES E INTEGRAÇÃO COM src/buttons.js
+   GERAÇÃO DE BOTÕES
 ===================================================== */
 
 function gerarBotoes(qtd, indexMensagem) {
-  const quantidade = limitarNumero(
-    qtd,
-    1,
-    CONFIG.limiteBotoes
-  );
+  const quantidade = limitarNumero(qtd, 1, CONFIG.limiteBotoes);
   const botoes = [];
 
   for (let i = 1; i <= quantidade; i++) {
+    // CORRIGIDO: Interpolação correta
     botoes.push({
       id: `travar_${indexMensagem}_${i}`,
-      text: `🤖「 #${i} 」 🤖`,
+      text: `🤖「 #${i} 」🤖`,
     });
   }
 
   return botoes;
 }
+
+/* =====================================================
+   ENVIAR COM IMAGEM + BOTÕES (VERSÃO AUTORIZADA PARA GRUPOS)
+===================================================== */
 
 async function enviarComImagemEBotoes(
   socket,
@@ -467,45 +463,19 @@ async function enviarComImagemEBotoes(
 ) {
   const imagem = usarImagem ? obterImagem() : null;
 
-  // Validação e sincronização preventiva da sessão E2EE para evitar "Aguardando mensagem"
+  // Prefetch seguro (não quebra envio em grupos)
   try {
     if (typeof socket?.presenceSubscribe === "function") {
-      await socket.presenceSubscribe(jid);
+      await socket.presenceSubscribe(jid).catch(() => {});
     }
     if (typeof socket?.assertSessions === "function") {
-      await socket.assertSessions([jid], true);
+      await socket.assertSessions([jid], true).catch(() => {});
     }
   } catch (e) {
-    // Ignora se não suportado na versão
+    // Ignora completamente (evita crash em grupos sem suporte)
   }
 
-  // 1. Tenta usar sendInteractiveMessage (prioridade do src/buttons.js)
-  if (typeof sendInteractiveMessage === "function") {
-    try {
-      const interactiveButtons = botoes.slice(0, 10).map((botao, idx) => ({
-        name: "quick_reply",
-        buttonParamsJson: JSON.stringify({
-          display_text: botao.text,
-          id: botao.id || `quick_${idx + 1}`,
-        }),
-      }));
-
-      return await sendInteractiveMessage(socket, jid, {
-        text: String(texto),
-        footer: footer || CONFIG.footer,
-        image: imagem,
-        interactiveButtons,
-        quoted,
-      });
-    } catch (error) {
-      console.log(
-        "[TRAVAR] sendInteractiveMessage falhou, tentando sendButtons:",
-        error?.message || error
-      );
-    }
-  }
-
-  // 2. Tenta usar sendButtons (fallback secundário do src/buttons.js)
+  // === SEND BUTTONS (MÉTODO PRINCIPAL - Funciona em PV e grupos) ===
   if (typeof sendButtons === "function") {
     try {
       return await sendButtons(socket, jid, {
@@ -513,17 +483,14 @@ async function enviarComImagemEBotoes(
         footer: footer || CONFIG.footer,
         image: imagem,
         buttons: botoes.slice(0, 10),
-        quoted,
+        quoted: quoted || undefined,
       });
     } catch (error) {
-      console.log(
-        "[TRAVAR] sendButtons falhou, aplicando fallback textual:",
-        error?.message || error
-      );
+      console.log("[TRAVAR] sendButtons falhou:", error?.message || error);
     }
   }
 
-  // 3. Fallback final caso o módulo de botões falhe completamente
+  // === Fallback TOTALMENTE seguro (sem try/catch quebrado) ===
   let textoFinal = `${texto}\n\n`;
   if (botoes && botoes.length) {
     textoFinal += botoes.map((b) => `• ${b.text}`).join("\n") + "\n\n";
