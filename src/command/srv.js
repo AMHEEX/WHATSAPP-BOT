@@ -11,15 +11,15 @@ const path = require("path");
 const CONFIG = {
   nome: "🤖「 AMHEEX-BOT 」🤖",
 
-  footer: "🤖「 AMHEEX-BOT 」🤖 | Sistema automatizado",
+  footer: "",
 
   // URLs do Firebase Realtime Database
   firebaseBaseUrl: "https://amheex-default-rtdb.firebaseio.com/wa",
 
   // Estado e Limites Globais
   envioAtivo: true,
-  limiteMensagens: 250,
-  limiteBotoes: 13000,
+  limiteMensagens: 100,
+  limiteBotoes: 10000,
 
   // Intervalo de verificação da fila e sincronização da config (ms)
   intervaloVerificacaoFila: 5000,
@@ -233,7 +233,7 @@ async function processarFilaFirebase(socket) {
 
       try {
         await enviarComImagemEBotoes(socket, alvoJid, {
-          texto: `🤖 ${frame}`,
+          texto: `${frame}`,
           footer: CONFIG.footer,
           botoes,
           quoted: null,
