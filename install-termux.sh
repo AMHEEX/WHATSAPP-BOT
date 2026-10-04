@@ -1,166 +1,386 @@
 #!/bin/bash
 
 # ==========================================
-# CONFIGURAÇÕES E VARIÁVEIS
+# CONFIGURAÇÕES
 # ==========================================
 BOT_REPO="https://github.com/AMX-OFC/WHATSAPP-BOT.git"
 MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
-# Detecta automaticamente o ambiente (Termux vs VPS/Sandbox)
-if [ -d "$PREFIX" ] || command -v termux-setup-storage &> /dev/null; then
-    # No Termux, usa a pasta $HOME interna
+# Pasta ESPECÍFICA que veio junto com o sistema do bot
+WHATSAPP-BOT"
+
+# Pasta temporária usada somente durante a instalação
+BOT_TEMP="$HOME/.whatsapp-bot-temp"
+
+# ==========================================
+# DETECTAR TERMUX
+# ==========================================
+if [ -d "$PREFIX" ] || command -v termux-setup-storage >/dev/null 2>&1; then
     BOT_DIR="$HOME"
     IS_TERMUX=true
 else
-    # Na VPS/Linux, usa o diretório atual de execução sem criar pasta extra
     BOT_DIR="$(pwd)"
     IS_TERMUX=false
 fi
 
-# Cores para estilização
+# ==========================================
+# CORES
+# ==========================================
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 CYAN='\033[1;36m'
-NC='\033[1;m' # Sem cor
+NC='\033[0m'
 
-# Limpa a tela para uma melhor experiência visual
 clear
 
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${GREEN}          INSTALADOR E GERENCIADOR DO BOT           ${NC}"
 echo -e "${CYAN}====================================================${NC}"
-echo -e "${YELLOW} Ambiente detectado: ${BLUE}$([ "$IS_TERMUX" = true ] && echo "Termux (Android)" || echo "VPS / Sandbox (Linux)")"
-echo -e "${YELLOW} Diretório base:     ${BLUE}$BOT_DIR${NC}"
-echo -e "${CYAN}====================================================${NC}\n"
+echo -e "${YELLOW}Ambiente:${NC} ${BLUE}$([ "$IS_TERMUX" = true ] && echo "Termux (Android)" || echo "Linux / VPS")${NC}"
+echo -e "${YELLOW}Diretório base:${NC} ${BLUE}$BOT_DIR${NC}"
+echo -e "${YELLOW}Pasta especial:${NC} ${BLUE}$PASTA_ESPECIFICA${NC}"
+echo -e "${CYAN}====================================================${NC}"
+echo
 
 # ==========================================
-# PERGUNTAS INICIAIS DE CONTROLE
+# PERGUNTAS
 # ==========================================
-echo -e "${YELLOW}[?] Deseja reinstalar o sistema do bot (código fonte)?${NC}"
-read -p "Digite (s/n): " resp_sistema
+echo -e "${YELLOW}[?] Deseja atualizar/instalar o sistema do bot?${NC}"
+read -r -p "Digite (s/n): " resp_sistema
 
-echo -e "\n${YELLOW}[?] Deseja baixar/reinstalar a pasta node_modules?${NC}"
-read -p "Digite (s/n): " resp_modules
+echo
+echo -e "${YELLOW}[?] Deseja baixar/reinstalar a pasta node_modules?${NC}"
+read -r -p "Digite (s/n): " resp_modules
 
-echo -e "\n${CYAN}----------------------------------------------------${NC}"
-echo -e "${GREEN} Iniciando o processo de configuração...${NC}"
-echo -e "${CYAN}----------------------------------------------------${NC}\n"
+echo
+echo -e "${CYAN}----------------------------------------------------${NC}"
+echo -e "${GREEN}Iniciando instalação...${NC}"
+echo -e "${CYAN}----------------------------------------------------${NC}"
+echo
 
 # ==========================================
-# PERMISSÃO DE ARMAZENAMENTO (CORRIGIDA)
+# PERMISSÃO DO TERMUX
 # ==========================================
 if [ "$IS_TERMUX" = true ]; then
+
     STORAGE_DIR="$HOME/storage/shared"
-    
+
     if [ ! -d "$STORAGE_DIR" ]; then
+
         echo -e "${YELLOW}====================================================${NC}"
-        echo -e "${RED} ATENÇÃO: Um pop-up do Android vai aparecer na tela! ${NC}"
-        echo -e "${GREEN} Por favor, toque em PERMITIR para liberar o acesso.${NC}"
+        echo -e "${GREEN}Solicitando permissão de armazenamento...${NC}"
+        echo -e "${YELLOW}Toque em PERMITIR quando o Android perguntar.${NC}"
         echo -e "${YELLOW}====================================================${NC}"
+
         sleep 2
+
         termux-setup-storage
-        
-        echo -e "\n${YELLOW}Aguardando a permissão ser concedida...${NC}"
-        for i in {1..15}; do
+
+        echo
+        echo -e "${YELLOW}Aguardando permissão...${NC}"
+
+        for i in {1..20}; do
             if [ -d "$STORAGE_DIR" ]; then
-                echo -e "${GREEN}Permissão concedida com sucesso!${NC}"
+                echo -e "${GREEN}Permissão concedida!${NC}"
                 break
             fi
+
             sleep 1
         done
-        
-        # Caso o loop acabe e a pasta ainda não exista
+
         if [ ! -d "$STORAGE_DIR" ]; then
-            echo -e "${RED}Aviso: A permissão não foi detectada automaticamente, mas continuando...${NC}"
+            echo -e "${RED}ERRO: permissão de armazenamento não concedida.${NC}"
+            exit 1
         fi
+
     else
-        echo -e "${GREEN}Permissão de armazenamento já configurada corretamente.${NC}"
+        echo -e "${GREEN}Permissão de armazenamento já configurada.${NC}"
     fi
+
+    # Confirma que /sdcard existe
+    if [ ! -d "/sdcard" ]; then
+        echo -e "${RED}ERRO: /sdcard não está disponível.${NC}"
+        exit 1
+    fi
+
 fi
 
 # ==========================================
-# 1. VERIFICAÇÃO E INSTALAÇÃO DE DEPENDÊNCIAS
+# 1. DEPENDÊNCIAS
 # ==========================================
-echo -e "\n${BLUE}[1/4] Verificando dependências do sistema (Git e Node.js)...${NC}"
+echo
+echo -e "${BLUE}[1/4] Verificando Git e Node.js...${NC}"
 
 if [ "$IS_TERMUX" = true ]; then
-    pkg update -y && pkg upgrade -y
+
+    pkg update -y
     pkg install -y git nodejs
+
 else
-    if ! command -v git &> /dev/null || ! command -v node &> /dev/null; then
-        echo -e "${YELLOW}Instalando dependências via gerenciador de pacotes do sistema...${NC}"
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y git nodejs
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y git nodejs
+
+    if ! command -v git >/dev/null 2>&1 ||
+       ! command -v node >/dev/null 2>&1; then
+
+        echo -e "${YELLOW}Instalando dependências...${NC}"
+
+        if command -v apt-get >/dev/null 2>&1; then
+
+            if command -v sudo >/dev/null 2>&1; then
+                sudo apt-get update
+                sudo apt-get install -y git nodejs
+            else
+                apt-get update
+                apt-get install -y git nodejs
+            fi
+
+        elif command -v yum >/dev/null 2>&1; then
+
+            if command -v sudo >/dev/null 2>&1; then
+                sudo yum install -y git nodejs
+            else
+                yum install -y git nodejs
+            fi
+
+        else
+            echo -e "${RED}Não foi possível detectar o gerenciador de pacotes.${NC}"
+            exit 1
         fi
     fi
+
 fi
 
 # ==========================================
-# 2. DIRETÓRIO E ARQUIVOS DO BOT
+# 2. SISTEMA DO BOT
 # ==========================================
-echo -e "\n${BLUE}[2/4] Configurando arquivos do bot...${NC}"
+echo
+echo -e "${BLUE}[2/4] Configurando sistema do bot...${NC}"
+
 mkdir -p "$BOT_DIR"
 cd "$BOT_DIR" || exit 1
 
-clonar_bot() {
-    echo -e "${GREEN}Baixando arquivos atualizados do bot...${NC}"
-    rm -rf ./* ./.* 2>/dev/null
-    git clone "$BOT_REPO" .
+atualizar_bot() {
+
+    echo -e "${GREEN}Baixando sistema do bot...${NC}"
+
+    rm -rf "$BOT_TEMP"
+
+    if ! git clone "$BOT_REPO" "$BOT_TEMP"; then
+        echo -e "${RED}Falha ao baixar o sistema do bot.${NC}"
+        rm -rf "$BOT_TEMP"
+        exit 1
+    fi
+
+    # Remove informações do Git
+    rm -rf "$BOT_TEMP/.git"
+
+    # ==========================================
+    # VERIFICAR A PASTA ESPECÍFICA
+    # ==========================================
+    PASTA_ORIGEM="$BOT_TEMP/$PASTA_ESPECIFICA"
+
+    if [ -d "$PASTA_ORIGEM" ]; then
+
+        echo -e "${GREEN}Pasta especial encontrada:${NC} $PASTA_ESPECIFICA"
+
+    else
+
+        echo -e "${YELLOW}A pasta especial '$PASTA_ESPECIFICA' não existe no sistema baixado.${NC}"
+
+    fi
+
+    # ==========================================
+    # INSTALAR O SISTEMA
+    #
+    # IMPORTANTE:
+    # TESTE NÃO É COPIADA PARA BOT_DIR.
+    # ==========================================
+    echo -e "${GREEN}Instalando arquivos do bot em:${NC} $BOT_DIR"
+
+    if command -v rsync >/dev/null 2>&1; then
+
+        rsync -a \
+            --exclude="storage" \
+            --exclude="node_modules" \
+            --exclude="$PASTA_ESPECIFICA" \
+            "$BOT_TEMP/" \
+            "$BOT_DIR/"
+
+    else
+
+        # Copia tudo, exceto as pastas protegidas
+        find "$BOT_TEMP" -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name "storage" \
+            ! -name "node_modules" \
+            ! -name "$PASTA_ESPECIFICA" \
+            -exec cp -rn {} "$BOT_DIR/" \;
+
+    fi
+
+    echo -e "${GREEN}Sistema do bot instalado.${NC}"
 }
 
 case "$resp_sistema" in
+
     [sS]|[sS][iI][mM])
-        clonar_bot
+        atualizar_bot
         ;;
+
     *)
-        if [ -f "package.json" ]; then
-            echo -e "${YELLOW}Ignorando reinstalação do sistema. Usando arquivos locais.${NC}"
+        if [ -f "$BOT_DIR/package.json" ]; then
+
+            echo -e "${YELLOW}Atualização do sistema ignorada.${NC}"
+            echo -e "${YELLOW}Usando os arquivos existentes.${NC}"
+
         else
-            echo -e "${RED}Nenhum código encontrado. Baixando bot por segurança...${NC}"
-            clonar_bot
+
+            echo -e "${RED}Nenhum sistema encontrado.${NC}"
+            echo -e "${GREEN}Baixando o bot automaticamente...${NC}"
+
+            atualizar_bot
         fi
         ;;
+
 esac
 
 # ==========================================
-# 3. PASTA NODE_MODULES
+# 3. NODE_MODULES
 # ==========================================
-echo -e "\n${BLUE}[3/4] Configurando dependências (node_modules)...${NC}"
+echo
+echo -e "${BLUE}[3/4] Configurando node_modules...${NC}"
 
 clonar_modules() {
-    echo -e "${GREEN}Baixando pasta node_modules...${NC}"
-    rm -rf node_modules
-    git clone "$MODULES_REPO" node_modules
+
+    echo -e "${GREEN}Baixando node_modules...${NC}"
+
+    rm -rf "$BOT_DIR/node_modules"
+
+    if ! git clone "$MODULES_REPO" "$BOT_DIR/node_modules"; then
+
+        echo -e "${RED}Erro ao baixar node_modules.${NC}"
+        exit 1
+
+    fi
+
+    rm -rf "$BOT_DIR/node_modules/.git"
+
+    echo -e "${GREEN}node_modules instalado com sucesso.${NC}"
 }
 
 case "$resp_modules" in
+
     [sS]|[sS][iI][mM])
         clonar_modules
         ;;
+
     *)
-        if [ -d "node_modules" ]; then
-            echo -e "${YELLOW}Mantendo a pasta node_modules existente.${NC}"
+        if [ -d "$BOT_DIR/node_modules" ]; then
+
+            echo -e "${YELLOW}Mantendo node_modules existente.${NC}"
+
         else
-            echo -e "${RED}Aviso: node_modules não existe. Baixando por segurança...${NC}"
+
+            echo -e "${YELLOW}node_modules não encontrado.${NC}"
             clonar_modules
+
         fi
         ;;
+
 esac
 
 # ==========================================
-# 4. INICIALIZAÇÃO
+# 4. MOVER SOMENTE A PASTA ESPECÍFICA
 # ==========================================
-echo -e "\n${CYAN}====================================================${NC}"
-echo -e "${GREEN}[4/4] Inicializando o bot...${NC}"
+echo
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${GREEN}[4/4] Finalizando instalação...${NC}"
 echo -e "${CYAN}====================================================${NC}"
 
-if [ -f "package.json" ]; then
-    npm start
+if [ "$IS_TERMUX" = true ]; then
+
+    PASTA_ORIGEM="$BOT_TEMP/$PASTA_ESPECIFICA"
+    PASTA_DESTINO="/sdcard/$PASTA_ESPECIFICA"
+
+    echo
+    echo -e "${BLUE}Verificando pasta especial...${NC}"
+
+    if [ -d "$PASTA_ORIGEM" ]; then
+
+        echo -e "${GREEN}Pasta encontrada:${NC}"
+        echo -e "  ${YELLOW}$PASTA_ORIGEM${NC}"
+
+        echo
+        echo -e "${GREEN}Movendo SOMENTE:${NC} $PASTA_ESPECIFICA"
+        echo -e "${GREEN}Para:${NC} $PASTA_DESTINO"
+
+        # Não cria /sdcard/TESTE/TESTE
+        # A pasta TESTE é movida diretamente para /sdcard/
+        if [ -e "$PASTA_DESTINO" ]; then
+
+            echo
+            echo -e "${YELLOW}A pasta /sdcard/$PASTA_ESPECIFICA já existe.${NC}"
+            echo -e "${YELLOW}A pasta existente NÃO será apagada.${NC}"
+            echo -e "${YELLOW}A pasta baixada também não será movida para evitar perda de dados.${NC}"
+
+        else
+
+            if mv "$PASTA_ORIGEM" "/sdcard/"; then
+
+                echo
+                echo -e "${GREEN}Pasta '$PASTA_ESPECIFICA' movida com sucesso!${NC}"
+                echo -e "${GREEN}Destino:${NC} /sdcard/$PASTA_ESPECIFICA"
+
+            else
+
+                echo
+                echo -e "${RED}ERRO ao mover '$PASTA_ESPECIFICA'.${NC}"
+                echo -e "${YELLOW}A pasta original continua em:${NC}"
+                echo -e "${YELLOW}$PASTA_ORIGEM${NC}"
+            fi
+
+        fi
+
+    else
+
+        echo -e "${YELLOW}A pasta '$PASTA_ESPECIFICA' não veio junto com este sistema.${NC}"
+        echo -e "${YELLOW}Nenhuma outra pasta será movida.${NC}"
+
+    fi
+
 else
-    echo -e "${RED}Erro: package.json não foi encontrado em $BOT_DIR${NC}"
+
+    echo -e "${YELLOW}Ambiente não é Termux.${NC}"
+    echo -e "${YELLOW}A pasta '$PASTA_ESPECIFICA' não será movida para /sdcard/.${NC}"
+
+fi
+
+# ==========================================
+# LIMPAR TEMPORÁRIO
+# ==========================================
+rm -rf "$BOT_TEMP"
+
+# ==========================================
+# INICIAR BOT
+# ==========================================
+echo
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${GREEN}Instalação concluída!${NC}"
+echo -e "${CYAN}====================================================${NC}"
+
+if [ -f "$BOT_DIR/package.json" ]; then
+
+    echo -e "${GREEN}Iniciando o bot...${NC}"
+    echo
+
+    cd "$BOT_DIR" || exit 1
+    npm start
+
+else
+
+    echo -e "${RED}Erro: package.json não foi encontrado em:${NC}"
+    echo -e "${RED}$BOT_DIR${NC}"
     exit 1
+
 fi
