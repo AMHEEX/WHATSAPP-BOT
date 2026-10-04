@@ -6,16 +6,16 @@
 BOT_REPO="https://github.com/AMX-OFC/WHATSAPP-BOT.git"
 MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
-# Pasta ESPECÍFICA que veio junto com o sistema do bot
+# SOMENTE ESTA PASTA SERÁ MOVIDA PARA /sdcard
 PASTA_ESPECIFICA="WHATSAPP-BOT"
 
-# Pasta temporária usada somente durante a instalação
+# Diretório temporário do download
 BOT_TEMP="$HOME/.whatsapp-bot-temp"
 
 # ==========================================
 # DETECTAR TERMUX
 # ==========================================
-if [ -d "$PREFIX" ] || command -v termux-setup-storage >/dev/null 2>&1; then
+if [ -n "$PREFIX" ] && command -v termux-setup-storage >/dev/null 2>&1; then
     BOT_DIR="$HOME"
     IS_TERMUX=true
 else
@@ -38,9 +38,9 @@ clear
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${GREEN}          INSTALADOR E GERENCIADOR DO BOT           ${NC}"
 echo -e "${CYAN}====================================================${NC}"
-echo -e "${YELLOW}Ambiente:${NC} ${BLUE}$([ "$IS_TERMUX" = true ] && echo "Termux (Android)" || echo "Linux / VPS")${NC}"
-echo -e "${YELLOW}Diretório base:${NC} ${BLUE}$BOT_DIR${NC}"
-echo -e "${YELLOW}Pasta especial:${NC} ${BLUE}$PASTA_ESPECIFICA${NC}"
+echo -e "${YELLOW}Ambiente:${NC} $([ "$IS_TERMUX" = true ] && echo "Termux (Android)" || echo "Linux / VPS")"
+echo -e "${YELLOW}Diretório base:${NC} $BOT_DIR"
+echo -e "${YELLOW}Pasta específica:${NC} $PASTA_ESPECIFICA"
 echo -e "${CYAN}====================================================${NC}"
 echo
 
@@ -69,19 +69,15 @@ if [ "$IS_TERMUX" = true ]; then
 
     if [ ! -d "$STORAGE_DIR" ]; then
 
-        echo -e "${YELLOW}====================================================${NC}"
-        echo -e "${GREEN}Solicitando permissão de armazenamento...${NC}"
-        echo -e "${YELLOW}Toque em PERMITIR quando o Android perguntar.${NC}"
-        echo -e "${YELLOW}====================================================${NC}"
-
+        echo -e "${YELLOW}Solicitando permissão de armazenamento...${NC}"
         sleep 2
 
         termux-setup-storage
 
-        echo
         echo -e "${YELLOW}Aguardando permissão...${NC}"
 
         for i in {1..20}; do
+
             if [ -d "$STORAGE_DIR" ]; then
                 echo -e "${GREEN}Permissão concedida!${NC}"
                 break
@@ -99,7 +95,6 @@ if [ "$IS_TERMUX" = true ]; then
         echo -e "${GREEN}Permissão de armazenamento já configurada.${NC}"
     fi
 
-    # Confirma que /sdcard existe
     if [ ! -d "/sdcard" ]; then
         echo -e "${RED}ERRO: /sdcard não está disponível.${NC}"
         exit 1
@@ -144,7 +139,7 @@ else
             fi
 
         else
-            echo -e "${RED}Não foi possível detectar o gerenciador de pacotes.${NC}"
+            echo -e "${RED}Gerenciador de pacotes não encontrado.${NC}"
             exit 1
         fi
     fi
@@ -158,7 +153,6 @@ echo
 echo -e "${BLUE}[2/4] Configurando sistema do bot...${NC}"
 
 mkdir -p "$BOT_DIR"
-cd "$BOT_DIR" || exit 1
 
 atualizar_bot() {
 
@@ -172,31 +166,21 @@ atualizar_bot() {
         exit 1
     fi
 
-    # Remove informações do Git
+    # Remove Git
     rm -rf "$BOT_TEMP/.git"
 
-    # ==========================================
-    # VERIFICAR A PASTA ESPECÍFICA
-    # ==========================================
     PASTA_ORIGEM="$BOT_TEMP/$PASTA_ESPECIFICA"
 
-    if [ -d "$PASTA_ORIGEM" ]; then
-
-        echo -e "${GREEN}Pasta especial encontrada:${NC} $PASTA_ESPECIFICA"
-
-    else
-
-        echo -e "${YELLOW}A pasta especial '$PASTA_ESPECIFICA' não existe no sistema baixado.${NC}"
-
-    fi
-
     # ==========================================
-    # INSTALAR O SISTEMA
+    # INSTALAR SISTEMA DIRETAMENTE NO BOT_DIR
     #
-    # IMPORTANTE:
-    # TESTE NÃO É COPIADA PARA BOT_DIR.
+    # EXCEÇÕES:
+    # - storage
+    # - node_modules
+    # - WHATSAPP-BOT
     # ==========================================
-    echo -e "${GREEN}Instalando arquivos do bot em:${NC} $BOT_DIR"
+    echo -e "${GREEN}Instalando sistema diretamente em:${NC}"
+    echo -e "${BLUE}$BOT_DIR${NC}"
 
     if command -v rsync >/dev/null 2>&1; then
 
@@ -209,8 +193,9 @@ atualizar_bot() {
 
     else
 
-        # Copia tudo, exceto as pastas protegidas
-        find "$BOT_TEMP" -mindepth 1 -maxdepth 1 \
+        find "$BOT_TEMP" \
+            -mindepth 1 \
+            -maxdepth 1 \
             ! -name ".git" \
             ! -name "storage" \
             ! -name "node_modules" \
@@ -219,20 +204,72 @@ atualizar_bot() {
 
     fi
 
-    echo -e "${GREEN}Sistema do bot instalado.${NC}"
+    echo -e "${GREEN}Sistema instalado diretamente no BOT_DIR.${NC}"
+
+    # ==========================================
+    # MOVER A PASTA ESPECÍFICA
+    # ==========================================
+    if [ "$IS_TERMUX" = true ]; then
+
+        if [ -d "$PASTA_ORIGEM" ]; then
+
+            PASTA_DESTINO="/sdcard/$PASTA_ESPECIFICA"
+
+            echo
+            echo -e "${GREEN}Pasta específica encontrada:${NC} $PASTA_ESPECIFICA"
+
+            if [ -e "$PASTA_DESTINO" ]; then
+
+                echo -e "${YELLOW}A pasta já existe:${NC}"
+                echo -e "${YELLOW}$PASTA_DESTINO${NC}"
+                echo -e "${YELLOW}Não será sobrescrita.${NC}"
+
+            else
+
+                echo -e "${GREEN}Movendo somente:${NC}"
+                echo -e "${BLUE}$PASTA_ESPECIFICA${NC}"
+
+                if mv "$PASTA_ORIGEM" "/sdcard/"; then
+
+                    echo -e "${GREEN}Pasta movida com sucesso:${NC}"
+                    echo -e "${BLUE}$PASTA_DESTINO${NC}"
+
+                else
+
+                    echo -e "${RED}Erro ao mover $PASTA_ESPECIFICA.${NC}"
+                    exit 1
+
+                fi
+
+            fi
+
+        else
+
+            echo -e "${YELLOW}A pasta '$PASTA_ESPECIFICA' não foi encontrada no sistema.${NC}"
+            echo -e "${YELLOW}Nenhuma outra pasta será movida.${NC}"
+
+        fi
+
+    fi
 }
 
+# ==========================================
+# EXECUTAR INSTALAÇÃO DO SISTEMA
+# ==========================================
 case "$resp_sistema" in
 
     [sS]|[sS][iI][mM])
+
         atualizar_bot
+
         ;;
 
     *)
+
         if [ -f "$BOT_DIR/package.json" ]; then
 
             echo -e "${YELLOW}Atualização do sistema ignorada.${NC}"
-            echo -e "${YELLOW}Usando os arquivos existentes.${NC}"
+            echo -e "${YELLOW}Usando arquivos existentes.${NC}"
 
         else
 
@@ -240,7 +277,9 @@ case "$resp_sistema" in
             echo -e "${GREEN}Baixando o bot automaticamente...${NC}"
 
             atualizar_bot
+
         fi
+
         ;;
 
 esac
@@ -253,7 +292,8 @@ echo -e "${BLUE}[3/4] Configurando node_modules...${NC}"
 
 clonar_modules() {
 
-    echo -e "${GREEN}Baixando node_modules...${NC}"
+    echo -e "${GREEN}Baixando node_modules diretamente em:${NC}"
+    echo -e "${BLUE}$BOT_DIR/node_modules${NC}"
 
     rm -rf "$BOT_DIR/node_modules"
 
@@ -266,16 +306,19 @@ clonar_modules() {
 
     rm -rf "$BOT_DIR/node_modules/.git"
 
-    echo -e "${GREEN}node_modules instalado com sucesso.${NC}"
+    echo -e "${GREEN}node_modules instalado diretamente no BOT_DIR.${NC}"
 }
 
 case "$resp_modules" in
 
     [sS]|[sS][iI][mM])
+
         clonar_modules
+
         ;;
 
     *)
+
         if [ -d "$BOT_DIR/node_modules" ]; then
 
             echo -e "${YELLOW}Mantendo node_modules existente.${NC}"
@@ -286,80 +329,23 @@ case "$resp_modules" in
             clonar_modules
 
         fi
+
         ;;
 
 esac
 
 # ==========================================
-# 4. MOVER SOMENTE A PASTA ESPECÍFICA
+# 4. LIMPAR TEMPORÁRIO
 # ==========================================
 echo
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${GREEN}[4/4] Finalizando instalação...${NC}"
 echo -e "${CYAN}====================================================${NC}"
 
-if [ "$IS_TERMUX" = true ]; then
-
-    PASTA_ORIGEM="$BOT_TEMP/$PASTA_ESPECIFICA"
-    PASTA_DESTINO="/sdcard/$PASTA_ESPECIFICA"
-
-    echo
-    echo -e "${BLUE}Verificando pasta especial...${NC}"
-
-    if [ -d "$PASTA_ORIGEM" ]; then
-
-        echo -e "${GREEN}Pasta encontrada:${NC}"
-        echo -e "  ${YELLOW}$PASTA_ORIGEM${NC}"
-
-        echo
-        echo -e "${GREEN}Movendo SOMENTE:${NC} $PASTA_ESPECIFICA"
-        echo -e "${GREEN}Para:${NC} $PASTA_DESTINO"
-
-        # Não cria /sdcard/TESTE/TESTE
-        # A pasta TESTE é movida diretamente para /sdcard/
-        if [ -e "$PASTA_DESTINO" ]; then
-
-            echo
-            echo -e "${YELLOW}A pasta /sdcard/$PASTA_ESPECIFICA já existe.${NC}"
-            echo -e "${YELLOW}A pasta existente NÃO será apagada.${NC}"
-            echo -e "${YELLOW}A pasta baixada também não será movida para evitar perda de dados.${NC}"
-
-        else
-
-            if mv "$PASTA_ORIGEM" "/sdcard/"; then
-
-                echo
-                echo -e "${GREEN}Pasta '$PASTA_ESPECIFICA' movida com sucesso!${NC}"
-                echo -e "${GREEN}Destino:${NC} /sdcard/$PASTA_ESPECIFICA"
-
-            else
-
-                echo
-                echo -e "${RED}ERRO ao mover '$PASTA_ESPECIFICA'.${NC}"
-                echo -e "${YELLOW}A pasta original continua em:${NC}"
-                echo -e "${YELLOW}$PASTA_ORIGEM${NC}"
-            fi
-
-        fi
-
-    else
-
-        echo -e "${YELLOW}A pasta '$PASTA_ESPECIFICA' não veio junto com este sistema.${NC}"
-        echo -e "${YELLOW}Nenhuma outra pasta será movida.${NC}"
-
-    fi
-
-else
-
-    echo -e "${YELLOW}Ambiente não é Termux.${NC}"
-    echo -e "${YELLOW}A pasta '$PASTA_ESPECIFICA' não será movida para /sdcard/.${NC}"
-
-fi
-
-# ==========================================
-# LIMPAR TEMPORÁRIO
-# ==========================================
+# Neste ponto a pasta específica já foi movida.
 rm -rf "$BOT_TEMP"
+
+echo -e "${GREEN}Arquivos temporários removidos.${NC}"
 
 # ==========================================
 # INICIAR BOT
