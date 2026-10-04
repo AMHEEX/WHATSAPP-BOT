@@ -8,11 +8,11 @@ MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
 # Detecta automaticamente o ambiente (Termux vs VPS/Sandbox)
 if [ -d "$PREFIX" ] || command -v termux-setup-storage &> /dev/null; then
-    # Ambiente Termux
+    # No Termux, usa a pasta $HOME interna
     BOT_DIR="$HOME"
     IS_TERMUX=true
 else
-    # Ambiente VPS / Sandbox / Linux padrão
+    # Na VPS/Linux, usa o diretório atual de execução sem criar pasta extra
     BOT_DIR="$(pwd)"
     IS_TERMUX=false
 fi
@@ -48,19 +48,42 @@ echo -e "\n${CYAN}----------------------------------------------------${NC}"
 echo -e "${GREEN} Iniciando o processo de configuração...${NC}"
 echo -e "${CYAN}----------------------------------------------------${NC}\n"
 
-# Apenas executa configuração de armazenamento se for Termux
+# ==========================================
+# PERMISSÃO DE ARMAZENAMENTO (CORRIGIDA)
+# ==========================================
 if [ "$IS_TERMUX" = true ]; then
-    if [ ! -d "/storage/shared/WHATSAPP-BOT" ]; then
-        echo -e "${YELLOW}Solicitando permissão de armazenamento do Android...${NC}"
+    STORAGE_DIR="$HOME/storage/shared"
+    
+    if [ ! -d "$STORAGE_DIR" ]; then
+        echo -e "${YELLOW}====================================================${NC}"
+        echo -e "${RED} ATENÇÃO: Um pop-up do Android vai aparecer na tela! ${NC}"
+        echo -e "${GREEN} Por favor, toque em PERMITIR para liberar o acesso.${NC}"
+        echo -e "${YELLOW}====================================================${NC}"
+        sleep 2
         termux-setup-storage
-        sleep 3
+        
+        echo -e "\n${YELLOW}Aguardando a permissão ser concedida...${NC}"
+        for i in {1..15}; do
+            if [ -d "$STORAGE_DIR" ]; then
+                echo -e "${GREEN}Permissão concedida com sucesso!${NC}"
+                break
+            fi
+            sleep 1
+        done
+        
+        # Caso o loop acabe e a pasta ainda não exista
+        if [ ! -d "$STORAGE_DIR" ]; then
+            echo -e "${RED}Aviso: A permissão não foi detectada automaticamente, mas continuando...${NC}"
+        fi
+    else
+        echo -e "${GREEN}Permissão de armazenamento já configurada corretamente.${NC}"
     fi
 fi
 
 # ==========================================
 # 1. VERIFICAÇÃO E INSTALAÇÃO DE DEPENDÊNCIAS
 # ==========================================
-echo -e "${BLUE}[1/4] Verificando dependências do sistema (Git e Node.js)...${NC}"
+echo -e "\n${BLUE}[1/4] Verificando dependências do sistema (Git e Node.js)...${NC}"
 
 if [ "$IS_TERMUX" = true ]; then
     pkg update -y && pkg upgrade -y
