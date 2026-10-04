@@ -3,12 +3,12 @@
 # ==========================================
 # CONFIGURAÇÕES E VARIÁVEIS
 # ==========================================
-BOT_DIR="$HOME/storage/shared/WHATSAPP-BOT"
+BOT_DIR="$HOME/"
 BOT_REPO="https://github.com/AMX-OFC/WHATSAPP-BOT.git"
 MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
 # Solicitando permissão de acesso ao armazenamento do Android caso não tenha
-if [ ! -d "/sdcard" ]; then
+if [ ! -d "/storage/shared/WHATSAPP-BOT" ]; then
     echo "Solicitando permissão de armazenamento..."
     termux-setup-storage
     sleep 3
