@@ -3,7 +3,7 @@
 # ==========================================
 # CONFIGURAÇÕES E VARIÁVEIS
 # ==========================================
-BOT_DIR="/sdcard/WHATSAPP-BOT"
+BOT_DIR="$HOEM/storage/shared/WHATSAPP-BOT"
 BOT_REPO="https://github.com/AMX-OFC/WHATSAPP-BOT.git"
 MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
