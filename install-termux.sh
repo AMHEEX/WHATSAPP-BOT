@@ -7,7 +7,7 @@ BOT_REPO="https://github.com/AMX-OFC/WHATSAPP-BOT.git"
 MODULES_REPO="https://github.com/AMX-OFC/node_modules.git"
 
 # Pasta ESPECÍFICA que veio junto com o sistema do bot
-WHATSAPP-BOT"
+PASTA_ESPECIFICA="WHATSAPP-BOT"
 
 # Pasta temporária usada somente durante a instalação
 BOT_TEMP="$HOME/.whatsapp-bot-temp"
